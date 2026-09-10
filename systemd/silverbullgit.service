@@ -1,0 +1,15 @@
+[Unit]
+Description=Snapshot a SilverBullet space into git
+Documentation=https://github.com/jasonfen/silverbullgit
+
+[Service]
+Type=oneshot
+# Replace with the user that owns the space directory. This must match the
+# uid/gid SilverBullet itself runs as (or a docker "user:" override) so that
+# git commits made by both engines share ownership. See the README's
+# "Docker uid gotcha" section before setting this on a containerized SilverBullet.
+User=CHANGEME
+Group=CHANGEME
+WorkingDirectory=/path/to/space
+Environment=SPACE_DIR=/path/to/space
+ExecStart=/path/to/silverbullgit/vault-snapshot.sh
