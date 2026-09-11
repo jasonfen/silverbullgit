@@ -173,6 +173,13 @@ local function renderVersion(page, hash)
   }, "\n")
 end
 
+-- Guarded: a throw here would abort the rest of this block. Commands are
+-- registered in a separate block above so they survive regardless.
+if virtualPage == nil then
+  print("SilverbullGit: virtualPage API unavailable, history pages will not render")
+  return
+end
+
 virtualPage.define {
   pattern = "history:(.+)",
   run = function(rest)
