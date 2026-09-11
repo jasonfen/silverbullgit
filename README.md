@@ -4,14 +4,15 @@ Git-backed version history for a [SilverBullet](https://silverbullet.md) 2.10
 space. Two commit engines plus per-page browsing, all Space Lua and one shell
 script, no plugs.
 
-- **`Git.md`**: a Space Lua page that commits the whole space on a timer while
-  a browser tab is open, and exposes `Git: Commit now` / `Git: Commit with
-  message` commands.
+- **`LIBRARY.md`**: the SilverBullet library, installed to
+  `Library/jasonfen/SilverbullGit`. Commits the whole space on a timer while a
+  browser tab is open, exposes `Git: Commit now` / `Git: Commit with message`,
+  and renders version history as read-only virtual pages.
 - **`vault-snapshot.sh`**: a host-side script, run from a systemd timer, that
   commits the space on a fixed interval regardless of whether a tab is open.
-- **`History.md`**: a Space Lua page that reads commit history straight out
-  of git and renders it as read-only virtual pages: `history:<page>` for a
-  version list, `history:<page>/<hash>` for the page as it stood at that
+- **`REPO.md`**: a library repository page, so the library can be found and
+  updated through `Library: Add Repository`. History is read straight out of
+  git: `history:<page>` for a version list, `history:<page>/<hash>` for that
   commit.
 
 ## This is temporary
@@ -32,7 +33,7 @@ below. When it ships, switch to it. Its Unmanaged mode reads an existing git
 repo without committing to it, which is exactly the shape a space using this
 project already has: point Unmanaged at the repo `vault-snapshot.sh` has been
 committing to, and it picks up the same history. At that point, delete
-`Git.md` and `History.md` and stop the systemd timer, or keep the timer as
+the library and stop the systemd timer, or keep the timer as
 your committer under Unmanaged if you prefer a host-side cadence to the
 server's own.
 
@@ -41,50 +42,72 @@ against `main` before release; details may have changed by the time it ships.
 
 ## Install (SilverBullet 2.10)
 
-1. Initialize git in the space folder if it is not already a repo, and set a
-   repo-local identity:
+### 1. Make the space a git repository
 
-   ```bash
-   cd /path/to/your/space
-   git init
-   git config user.name "Your Name"
-   git config user.email "you@example.com"
-   ```
+The library commits into an existing repo. It does not create one.
 
-2. Copy `Git.md` and `History.md` into the space root:
+```bash
+cd /path/to/your/space
+git init
+git config user.name "Your Name"
+git config user.email "you@example.com"
+```
 
-   ```bash
-   cp Git.md History.md /path/to/your/space/
-   ```
+### 2. Install the library
 
-3. Add the auto-commit interval to `CONFIG.md` in the space:
+Two options. Both install to `Library/jasonfen/SilverbullGit`.
 
-   ```space-lua
-   config.set("git.autoCommitMinutes", 5)
-   ```
+**Via Library Manager** (preferred). Run `Library: Install` and give it:
 
-4. Install the systemd timer for unattended commits (covers the time no
-   browser tab is open):
+```
+https://github.com/jasonfen/silverbullgit/blob/master/LIBRARY.md
+```
 
-   ```bash
-   sudo cp systemd/silverbullgit.service /etc/systemd/system/
-   sudo cp systemd/silverbullgit.timer /etc/systemd/system/
-   sudo cp vault-snapshot.sh /path/to/silverbullgit/vault-snapshot.sh
-   sudo chmod +x /path/to/silverbullgit/vault-snapshot.sh
-   ```
+To get updates and see other libraries from the same author, run
+`Library: Add Repository` with:
 
-   Edit `silverbullgit.service`: set `User`, `Group`, `WorkingDirectory`, the
-   `SPACE_DIR` environment variable, and `ExecStart` to point at your copy of
-   `vault-snapshot.sh`. `User`/`Group` must match the uid/gid that owns the
-   space directory (see the Docker uid section below).
+```
+https://github.com/jasonfen/silverbullgit/blob/master/REPO.md
+```
 
-   ```bash
-   sudo systemctl daemon-reload
-   sudo systemctl enable --now silverbullgit.timer
-   ```
+**By hand.** Copy `LIBRARY.md` into your space as
+`Library/jasonfen/SilverbullGit.md`. The path must match the `name` key in the
+file's frontmatter.
 
-`vault-snapshot.sh` also accepts the space path as its first argument instead
-of `SPACE_DIR`, for running it by hand: `./vault-snapshot.sh /path/to/space`.
+### 3. Set the snapshot interval
+
+Add to `CONFIG`:
+
+```lua
+config.set("git.autoCommitMinutes", 5)
+```
+
+Leave it unset to disable automatic snapshots and keep only the commands and
+history browsing. Do that if you commit by other means.
+
+### 4. Install the host timer
+
+Automatic snapshots only run while a browser tab is open, because
+`cron:secondPassed` is a client-side event. This timer covers the rest.
+
+```bash
+sudo install -m 755 vault-snapshot.sh /usr/local/bin/silverbullgit-snapshot
+sudo cp systemd/silverbullgit.service systemd/silverbullgit.timer /etc/systemd/system/
+sudoedit /etc/systemd/system/silverbullgit.service   # set User, Group and SPACE_DIR
+sudo systemctl daemon-reload
+sudo systemctl enable --now silverbullgit.timer
+systemctl list-timers silverbullgit.timer
+```
+
+The script takes the space path as `$1` or via `SPACE_DIR`. It exits silently on
+a clean tree and treats a lost `index.lock` as expected, since the Space Lua
+engine may be committing at the same time.
+
+### 5. Use it
+
+* `Git: Commit now` and `Git: Commit with message` commit on demand.
+* `history:<page>` lists every commit that touched a page.
+* `history:<page>/<hash>` renders the page as it stood at that commit.
 
 ## The Docker uid gotcha
 
@@ -122,13 +145,13 @@ it has to be tracked.
 
 ## Known limitations
 
-- **`cron:secondPassed` is a client-side event.** The Space Lua engine in
-  `Git.md` only commits while a SilverBullet tab is open in a browser. This is
+- **`cron:secondPassed` is a client-side event.** The Space Lua engine only
+  commits while a SilverBullet tab is open in a browser. This is
   why `vault-snapshot.sh` and its timer exist: they are the only engine that
   runs with no tab open.
 - **Both engines can race for `index.lock`.** Multiple open tabs, or the timer
   firing while a tab is mid-commit, can collide on git's lock file. Both
-  `Git.md` and `vault-snapshot.sh` treat a lost `index.lock` as expected and
+  the library and `vault-snapshot.sh` treat a lost `index.lock` as expected and
   stay silent about it; the next commit cycle picks up the change.
 - **Timestamps come from two different clocks.** The Space Lua engine builds
   its commit message client-side, so the message text uses the browser's
